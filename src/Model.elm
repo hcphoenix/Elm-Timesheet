@@ -1,37 +1,40 @@
 module Model exposing (..)
 
+import TTPicker
+import TType exposing (..)
+import NewTypes exposing (..)
+import BasicsExtra exposing (..)
+
 import List exposing (..)
 import Dict exposing (Dict)
-import Date exposing (Date, toRataDie)
+import Array exposing (Array)
+import Maybe exposing (withDefault)
+
+import Date exposing (Date)
 
 type alias Model =
-  { timesheet : Dict DieMins TType
+  { timesheet : Timesheet
   , viewingDate : Date
-  , todaysDate : Date
-  , selectedTType : TType
-  , ttPickerVisible : Bool
-  , dragState   : DragState
-  , hoveringCell : Maybe DieMins
-  , windowWidth : Int
+  , today : Die
+  , mouseState : MouseState
+  , ttPicker : TTPicker.Model
   }
 
-type alias DieMins = (Int, Int)
+type alias Timesheet = Dict Int (Array TType)
 
-type TType
-  = Work
-  | Sick
-  | Vaca
-allTTypes = [Work, Sick, Vaca]
-
-type DragState
+type MouseState
   = NoDrag
-  | Writing
-  | Erasing
+  | DrawingFrom Index
+  | ErasingFrom Index
 
-minuteIncrements = 15
+------- LENSES (GETTERS)
 
-hoursOfTTInDate : TType -> Date -> Dict DieMins TType -> Float
-hoursOfTTInDate tt date =
-    Dict.filter ( \(die,_) v -> die == toRataDie date && v == tt
-                )
-    >> Dict.size >> toFloat >> (*) (minuteIncrements/60)
+numTimesInDay = (24*60)//15
+
+getByDie : Die -> Timesheet -> Array TType
+getByDie (Die d) =
+    Dict.get d >> withDefault (Array.repeat numTimesInDay None)
+
+tsGet : Die -> Index -> Timesheet -> TType
+tsGet (Die d) (Index i) =
+    Dict.get d >> Maybe.map (Array.get i >> withDefault None) >> withDefault None
