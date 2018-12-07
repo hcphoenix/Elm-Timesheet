@@ -2,6 +2,7 @@ module BasicsExtra exposing (..)
 
 import List exposing (..)
 import List.Extra exposing (..)
+import Dict exposing (Dict)
 import Maybe exposing (withDefault)
 
 mapcat = concatMap --branding is important :3
@@ -16,14 +17,12 @@ curry f (a,b) = f a b
 
 both f a b = f a && f b
 
-apply f a = f a
-
-applyTo = flip >> apply
+updateDict : comparable -> (Maybe v -> v) -> Dict comparable v -> Dict comparable v
+updateDict key fn dict = Dict.insert key (fn <| Dict.get key dict) dict
 
 countGroupsBy : (a -> a -> Bool) -> List a -> List (a,Int)
 countGroupsBy predicate lst =
-    let
-        f (xf,i) l = case l of
+    let f (xf,i) l = case l of
             [] -> []
             [x] -> if predicate xf x then [(xf,i+1)] else (xf,i) :: [(x,1)]
             xh::xt -> if predicate xf xh then f (xf,i+1) xt else (xf,i) :: f (xh,1) xt
