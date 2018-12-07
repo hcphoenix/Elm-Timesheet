@@ -7,7 +7,7 @@ import ViewUtils exposing (..)
 
 import List exposing (range, filter, sum)
 import Dict exposing (Dict)
-import Array exposing (Array)
+import Tuple exposing (first, second)
 import Maybe exposing (withDefault)
 import Date exposing (Date)
 
@@ -45,8 +45,8 @@ update msg model =
         Select tt ->
             {model | open = False, selection = tt}
 
-view : Model -> Dict Int (Array TType) -> Date -> Element Msg
-view model timesheet vDate =
+view : Model -> Dict Int (Dict Int (Int, TType)) -> Die -> Element Msg
+view model timesheet vDie =
     el
         ( border ++ size ++
             [ pointer
@@ -64,15 +64,14 @@ view model timesheet vDate =
         )
     <| row [centerY, width fill]
         [ el
-            ( font ++
-                [centerX]
+            ( font ++ [centerX]
             )
         <| text <| joinBy '\n'
             [ printTType model.selection
-            , hoursOfTTInWeek model.selection (toRataDie vDate) timesheet
+            , hoursOfTTInWeek model.selection vDie timesheet
                 |> (\hrs -> if hrs == 0 then "" else String.fromFloat hrs ++ " hours this week")
             ]
-        , el [alignRight] <| text "▼"
+        , el [alignRight, Font.size 12] <| text <| if model.open then "▲" else "▼"
         ]
 
 viewChoices : TType -> Element Msg
@@ -114,11 +113,10 @@ size =
     , vh 5
     ]
 
-hoursOfTTInDie : TType -> Die -> Dict Int (Array TType) -> Float
-hoursOfTTInDie tt (Die die) =
-    Dict.get die >> Maybe.map (Array.length << Array.filter ((==) tt))
-    >> withDefault 0 >> toFloat >> (*) (minuteIncrements/60)
+hoursOfTTInDie : TType -> Die -> Dict Int (Dict Int (Int, TType)) -> Float
+hoursOfTTInDie tt (Die d) =
+    Dict.get d >> Maybe.map (Dict.values >> List.filter (second >> (==) tt) >> List.map (first >> (*) minuteIncrements >> toFloat >> (*) (1/60)) >> sum) >> withDefault 0
 
-hoursOfTTInWeek : TType -> Die -> Dict Int (Array TType) -> Float
+hoursOfTTInWeek : TType -> Die -> Dict Int (Dict Int (Int, TType)) -> Float
 hoursOfTTInWeek tt (Die from) timesheet =
     range from (from+6) |> List.map (\d -> hoursOfTTInDie tt (Die d) timesheet) |> sum

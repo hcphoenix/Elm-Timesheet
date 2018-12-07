@@ -29,10 +29,11 @@ main = Browser.element
 init : ( Model, Cmd Msg )
 init =
     (   { timesheet = Dict.empty
-        , viewingDate = Date.fromCalendarDate 2018 Jan 1
+        , viewingDie = toRataDie <| Date.fromCalendarDate 2018 Jan 1
         , today = Die 0
-        , mouseState = NoDrag
+        , drawState = Nothing
         , ttPicker = TTPicker.init
+        , tooltip = ""
         }
     , Cmd.batch
         [ Task.perform TodayIs Date.today
@@ -41,7 +42,7 @@ init =
     )
 
 subs = Sub.batch
-    [ Events.onMouseUp <| succeed DragEnd
+    [ Events.onMouseUp <| succeed DrawEnd
     , Events.onKeyPress <| D.map keyToCmd <| D.field "key" D.string
     ]
 
