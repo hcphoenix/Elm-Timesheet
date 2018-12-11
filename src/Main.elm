@@ -9,10 +9,10 @@ import Browser
 import Browser.Dom as Dom
 import Browser.Events as Events
 
-import Date exposing (Date, Interval(..), Unit(..))
+import Date exposing (Date, Interval(..), Unit(..), toRataDie)
 import Time exposing (Month(..))
 
-import Dict
+import Dict.Any exposing (AnyDict)
 import Task
 import Json.Decode as D exposing (succeed)
 
@@ -28,22 +28,24 @@ main = Browser.element
 
 init : ( Model, Cmd Msg )
 init =
-    (   { timesheet = Dict.empty
-        , viewingDie = toRataDie <| Date.fromCalendarDate 2018 Jan 1
-        , today = Die 0
-        , drawState = Nothing
+    (   { timesheet = abTestSheet --Dict.Any.empty toRataDie
+        , viewingDate = Date.floor Date.Monday <| Date.fromCalendarDate 2019 Feb 1
+        , today = Date.fromRataDie 9
+        , drawing = Nothing
+        , hoverCol = 0
         , ttPicker = TTPicker.init
+        , recentShifts = []
         , tooltip = ""
         }
     , Cmd.batch
-        [ Task.perform TodayIs Date.today
-        , Task.perform (always NoOp) (Dom.setViewport 0 View.startingY)
+        [ Task.perform (always NoOp) (Dom.setViewport 0 View.startingY)
+        --, Task.perform TodayIs Date.today
         ]
     )
 
 subs = Sub.batch
-    [ Events.onMouseUp <| succeed DrawEnd
-    , Events.onKeyPress <| D.map keyToCmd <| D.field "key" D.string
+    [ Events.onKeyPress <| D.map keyToCmd <| D.field "key" D.string
+    --, Events.onMouseUp <| succeed DrawEnd
     ]
 
 keyToCmd key =

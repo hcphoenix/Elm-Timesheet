@@ -1,15 +1,14 @@
 module TTPicker exposing (Model, Msg, init, update, view)
 
 import BasicsExtra exposing (..)
-import TType exposing (..)
 import NewTypes exposing (..)
 import ViewUtils exposing (..)
 
 import List exposing (range, filter, sum)
-import Dict exposing (Dict)
+import Dict.Any exposing (AnyDict, get)
 import Tuple exposing (first, second)
 import Maybe exposing (withDefault)
-import Date exposing (Date)
+import Date exposing (Date, Unit(..), Interval(..))
 
 import Element exposing (..)
 import Element.Events exposing (..)
@@ -45,10 +44,9 @@ update msg model =
         Select tt ->
             {model | open = False, selection = tt}
 
-view : Model -> Dict Int (Dict Int (Int, TType)) -> Die -> Element Msg
-view model timesheet vDie =
-    el
-        ( border ++ size ++
+view : Model -> Timesheet -> Date -> Element Msg
+view model timesheet vDate =
+    el  ( border ++ size ++
             [ pointer
             , alignRight
             , Background.color <| colorFromTType model.selection
@@ -68,7 +66,7 @@ view model timesheet vDie =
             )
         <| text <| joinBy '\n'
             [ printTType model.selection
-            , hoursOfTTInWeek model.selection vDie timesheet
+            , hoursOfTTInWeek model.selection timesheet vDate
                 |> (\hrs -> if hrs == 0 then "" else String.fromFloat hrs ++ " hours this week")
             ]
         , el [alignRight, Font.size 12] <| text <| if model.open then "▲" else "▼"
@@ -112,11 +110,3 @@ size =
     [ vw 20
     , vh 5
     ]
-
-hoursOfTTInDie : TType -> Die -> Dict Int (Dict Int (Int, TType)) -> Float
-hoursOfTTInDie tt (Die d) =
-    Dict.get d >> Maybe.map (Dict.values >> List.filter (second >> (==) tt) >> List.map (first >> (*) minuteIncrements >> toFloat >> (*) (1/60)) >> sum) >> withDefault 0
-
-hoursOfTTInWeek : TType -> Die -> Dict Int (Dict Int (Int, TType)) -> Float
-hoursOfTTInWeek tt (Die from) timesheet =
-    range from (from+6) |> List.map (\d -> hoursOfTTInDie tt (Die d) timesheet) |> sum

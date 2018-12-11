@@ -2,7 +2,6 @@ module View exposing (view, startingY)
 
 import BasicsExtra exposing (..)
 import Model exposing (..)
-import TType exposing (..)
 import NewTypes exposing (..)
 import Update exposing (..)
 import ViewUtils exposing (..)
@@ -17,26 +16,24 @@ import Element.Border as Border
 import Element.Font as Font
 import Element.Region as Region
 import Element.Input as Input exposing (button)
-import Element.Events exposing (onMouseDown, onMouseEnter, onMouseLeave)
+import Element.Events exposing (onMouseDown, onMouseUp, onMouseEnter, onMouseLeave)
 import Element.Lazy exposing (..)
 import Element.Keyed as Keyed
 
-import Date exposing (Date, fromRataDie)
+import Date exposing (Date, Interval(..), Unit(..), fromRataDie)
 
+import Dict.Any exposing (toList, get, empty)
 import List exposing (map, map2, indexedMap, range, repeat, singleton, sum, length, filter)
-import Dict exposing (Dict, get, empty)
 import Tuple exposing (first, second, pair, mapFirst, mapSecond)
 import Maybe exposing (withDefault)
 
 view : Model -> Html Msg
 view model =
-  let
-    mapDies f = map f <| diesInView model.viewingDie
-  in layout globalStyle <| row
-            [ inFront <| header model.ttPicker model.viewingDie model.today model.timesheet
-            , behindContent timeLabels
-            , cssStyle "-moz-user-select" "none"
-            ] <| indexedMap (timeColumn model) <| diesInView model.viewingDie
+    layout globalStyle <| row
+        [ inFront <| header model
+        , behindContent timeLabels
+        , cssStyle "-moz-user-select" "none"
+        ] <| indexedMap (timeColumn model) <| dateToWeek model.viewingDate
 
 globalStyle =
     [ Font.center
@@ -46,33 +43,30 @@ globalStyle =
 
 -- TIMES
 
-diesInView : Die -> List Die
-diesInView (Die d) = range d (d+6) |> map Die
-
-printMins : Mins -> String
-printMins (Mins time) =
+printMins : Index -> String
+printMins (Index i) =
     let
+        time = i * minuteIncrements
         hour = time // 60 |> modBy 12 |> (\h -> if h == 0 then 12 else h) |> String.fromInt
-        mins = if time |> divisibleBy 60
-                    then ""
-                    else time |> modBy 60 |> String.fromInt |> String.padLeft 2 '0' |> (++) ":"
-        ampm = if time < 12*60 then "AM" else "PM"
+        mins = time |> modBy 60 |> (\m -> if m == 0 then "" else String.fromInt m |> String.padLeft 2 '0' |> (++) ":")
+        ampm = if time < 12*60 || time == 60*24 then "AM" else "PM"
     in hour ++ mins ++ " " ++ ampm
 
-printDieWhereTodayIs : Die -> Die -> String
-printDieWhereTodayIs (Die today) (Die d) =
-   case d - today of
+printDateWhereTodayIs : Date -> Date -> String
+printDateWhereTodayIs today date =
+    case Date.diff Days date today of
         1  -> "Tomorrow"
         0  -> "Today"
     -- -1  -> "Yesterday" --Elm parser bug???
-        _  -> Date.format "EEE d" (fromRataDie d)
+        _  -> Date.format "EEE d" date
 
 -- VARIOUS
 
+paycheckEstimate : Timesheet -> Date -> Element Msg
 paycheckEstimate ts vd =
-    let total = diesInView vd |> mapcat
-            (\d -> get (dieToInt d) ts |> withDefault empty |> Dict.toList |> map (second >> first)
-            ) |> sum |> toFloat |> (*) (12.5 * minuteIncrements/60) |> round
+    let total = dateToWeek vd |> mapcat
+            (\d -> tsGet d ts |> Dict.Any.toList |> map (\(_,((Index i),_)) -> i))
+            |> sum |> toFloat |> (*) (12.5 * minuteIncrements/60) |> round
     in el [] <| if total == 0 then Element.none else 
         text <| (++) "Estimated pay for this week: $" <| String.fromInt total
 
@@ -83,8 +77,8 @@ timeLabels =
         , spacing cellHeight
         , padding cellHeight
         ]
-        ( stride {from=0, to=24*60-1, by=60} |> map
-            ( Mins >> printMins >> text >> el
+        ( range 0 23 |> map
+            ( (*) (60//minuteIncrements) >> Index >> printMins >> text >> el
                 [ width fill
                 , height <| px <| cellHeight * (45//minuteIncrements)
                 , Font.size 40
@@ -96,64 +90,67 @@ timeLabels =
 
 -- TIMESHEET
 
-timeColumn : Model -> Int -> Die -> Element Msg
-timeColumn model offset (Die d) =
-    let lst = get d model.timesheet |> withDefault empty |> Dict.toList
-    in el
-        ( [ moveDown <| toFloat headerHeight
-          ]
-        ++ (map inFront <| map (ttBlock offset) lst)
-        ++ case model.drawState of
-            Nothing -> []
-            Just (o,Index start,Index end) ->
-                if o==offset then
-                    [inFront <| ttBlock o ((min start end),(max start end - min start end + 1, model.ttPicker.selection)) ]
-                else []
-        ) <| lazy3 cells model.drawState model.ttPicker.selection offset
-
-ttBlock : Int -> (Int, (Int, TType)) -> Element Msg
-ttBlock offset (start, (len,tt)) =
-    el
-        [ colWidths
-        , height <| px <| cellHeight * len
-        , moveDown <| toFloat <| cellHeight * start
-        , clipX
-        , clipY
-        , Border.solid
-        , Border.width 1
-        , Border.color <| gray 0.3
-        , Background.color <| colorFromTType tt
-        , Font.size 16
-        --, cssStyle "pointer-events" "none"
-        , inFront <| el
-            [ alignRight
-            , Font.bold
-            , onMouseDown <| XBlock (Index start) offset
-            , pointer
+timeColumn : Model -> Int -> Date -> Element Msg
+timeColumn model offset d =
+    el  (   [ moveDown <| toFloat headerHeight
+            , onMouseEnter <| EnterCol offset
             ]
-            <| text "X"
-        ]
-    <| text <| joinBy '\n'
-        [ printTType tt
-        , printMins (Index start |> toMins) ++ " - " ++ printMins (Index (start+len) |> toMins)
-        ]
+        ++ (map inFront <| map (\(s,(e,tt)) -> ttBlock offset s e tt False) <| toList <| tsGet d model.timesheet)
+        ++ case model.drawing of
+            Nothing -> []
+            Just (start,end) ->
+                if offset==model.hoverCol then
+                    [ inFront <| ttBlock offset (minIndex start end) (maxIndex start end) model.ttPicker.selection True ]
+                else []
+        ) <| lazy3 cells model.drawing model.ttPicker.selection offset
 
-cells : Maybe (Int,Index,Index) -> TType -> Int -> Element Msg
+ttBlock offset (Index start) (Index end) tt isDragBlock =
+    joinBy '\n'
+        [ printTType tt
+        , printMins (Index start) ++ " - " ++ printMins (end+1 |> Index)
+        ]
+    |> text |> el
+        (   [ colWidths
+            , height <| px <| cellHeight * (end - start + 1)
+            , moveDown <| toFloat <| cellHeight * start
+            , clipX
+            , clipY
+            , Border.solid
+            , Border.width 1
+            , Border.color <| gray 0.3
+            , Background.color <| colorFromTType tt
+            , Font.size 16
+            ]
+        ++  if isDragBlock then
+                [ cssStyle "pointer-events" "none"
+                ] 
+            else 
+                [ inFront <| el
+                    [ alignRight
+                    , Font.bold
+                    , onMouseDown <| XBlock (Index start) offset
+                    , pointer
+                    ] <| text "X"
+                ]
+        )
+        
+
+cells : Maybe (Index,Index) -> TType -> Int -> Element Msg
 cells mouse sTT offset =
-    iRange 0 numTimesInDay |> map (cell mouse sTT offset)
-    |> column
+    iRange 0 numTimesInDay |> map (cell mouse sTT offset) |> column
         [ Border.solid
         , Border.width 1
         , Border.color <| gray 0.6
         ]
 
-cell : Maybe (Int,Index,Index) -> TType -> Int -> Index -> Element Msg
-cell mouse sTT offset index =
-    let mins = index |> toMins
-    in el
-        [ DrawCell offset index |> case mouse of
+cell : Maybe (Index,Index) -> TType -> Int -> Index -> Element Msg
+cell mouse sTT offset (Index i) =
+    let mins = i * minuteIncrements
+    in printMins (Index i) |> text |> el
+        [ DrawCell (Index i) |> case mouse of
             Nothing -> onMouseDown
-            Just _ -> onMouseEnter
+            Just _  -> onMouseEnter
+        , onMouseUp DrawEnd
         , colWidths
         , height <| px cellHeight
         , pointer
@@ -162,9 +159,9 @@ cell mouse sTT offset index =
             { left   = 0
             , right  = 0
             , bottom = 0
-            , top    = if mins |> isHour then 2 else 1
+            , top    = if mins |> divisibleBy 60 then 2 else 1
             }
-        , Border.color <| gray <| if mins |> isHour then 0.4 else 0.8
+        , Border.color <| gray <| if mins |> divisibleBy 60 then 0.4 else 0.8
         , Font.color invisible
         , Background.color <| invisible
         , mouseOver
@@ -172,38 +169,60 @@ cell mouse sTT offset index =
             , Font.color <| gray 0.7
             ]
         ]
-        <| text <| printMins mins
 
 -- HEADER
 
-header : TTPicker.Model -> Die -> Die -> Timesheet -> Element Msg
-header ttPicker vDie today timesheet =
+header : Model -> Element Msg
+header model =
     column headerStyle
     [ row
         [ centerX
         , spacing 10
         , width fill
-        , inFront <| Element.map TTPickerMsg <| lazy3 TTPicker.view ttPicker timesheet vDie
-        , inFront <| paycheckEstimate timesheet vDie
+        , inFront <| Element.map TTPickerMsg <| lazy3 TTPicker.view model.ttPicker model.timesheet model.viewingDate
+        , inFront <| paycheckEstimate model.timesheet model.viewingDate
         ]
         [ prevButton
-        , currentDateDisplay vDie
+        , currentDateDisplay model.viewingDate
         , nextButton
         ]
-    , vDie |> lazy2 dateHeadersWhereTodayIs today
+    , lazy dateHeaders {vDate = model.viewingDate, today = model.today, hoverCol = model.hoverCol, shifts = model.recentShifts}
     ]
 
-currentDateDisplay (Die d) = fromRataDie d |> Date.format " MMM y " |> text |> el currentDateStyle
+currentDateDisplay = Date.format " MMM y " >> text >> el
+    [ Font.size 32
+    ]
 
 prevButton = button buttonStyle {onPress = Just <| PrevWeek, label = text "← Prev Week"}
 nextButton = button buttonStyle {onPress = Just <| NextWeek, label = text "Next Week →"}
 
-dateHeadersWhereTodayIs today =
-    diesInView >> map
-        ( \die -> printDieWhereTodayIs today die |> text
-            |> el (thStyle ++ if die == today then [Font.bold] else [])
+dateHeaders {vDate, today, hoverCol, shifts} =
+    dateToWeek vDate |> indexedMap
+        ( \colNum date -> date |> printDateWhereTodayIs today |> text
+            |> el
+                ( thStyle
+                ++ if date /= today then [] else [Font.bold]
+                {-
+                ++ if colNum /= hoverCol then [] else
+                    [ below <| recentShiftPicker hoverCol shifts
+                    ]
+                -}
+                )
         )
-    >> row [centerX, width fill]
+    |> row [centerX, width fill]
+
+recentShiftPicker offset =
+    map (\(iStart,iEnd) -> el
+            [ width fill
+            , Background.color white
+            ] <| text <| "+ " ++ printMins iStart ++ " - " ++ printMins iEnd
+        )
+    >> column
+        [ colWidths
+        , cssStyle "position" "fixed"
+        , cssStyle "left" <| String.fromInt <| offset*14
+        , cssStyle "top" <| String.fromInt <| headerHeight
+        ]
 
 headerStyle =
     headerBorder ++
@@ -226,11 +245,7 @@ headerBorder =
         , right = 0
         , bottom = 1
         }
-    ]
-
-currentDateStyle =
-    [ Font.size 32
-    ]
+    ]  
 
 buttonStyle =
     [ centerX
